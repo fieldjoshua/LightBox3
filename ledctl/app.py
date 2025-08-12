@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import logging.handlers
 import os
 import signal
 import time
@@ -303,10 +304,38 @@ def create_app() -> Flask:
 
 
 def _init_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+    try:
+        log_dir = os.path.join(os.path.dirname(__file__), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "ledctl.log")
+
+        formatter = logging.Formatter(
+            "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+        )
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_path,
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+
+        root = logging.getLogger()
+        # Avoid duplicating handlers if re-initialized
+        if not getattr(root, "_ledctl_logging_configured", False):
+            root.setLevel(logging.INFO)
+            root.handlers = [stream_handler, file_handler]
+            root._ledctl_logging_configured = True  # type: ignore[attr-defined]
+    except Exception:
+        # Fallback to basic configuration if file logging fails
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        )
 
 
 def _ensure_dir(path: str) -> None:
