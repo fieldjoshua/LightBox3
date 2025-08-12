@@ -137,26 +137,19 @@ class Hub75Driver(OutputDevice):
             # Allow calls before open() to no-op safely
             return None
 
-        # Validate dimensions
-        if self._width and self._height:
-            if (
-                int(width) != int(self._width)
-                or int(height) != int(self._height)
-            ):
-                raise ValueError(
-                    (
-                        "Frame size %sx%s does not match HUB75 %sx%s"
-                        % (width, height, self._width, self._height)
-                    )
-                )
+        # Normalize dimensions: if mismatch, draw the overlapping region
+        target_w = int(self._width) if self._width else int(width)
+        target_h = int(self._height) if self._height else int(height)
+        draw_w = min(int(width), target_w)
+        draw_h = min(int(height), target_h)
 
         # Draw pixels onto offscreen canvas, then swap on vsync
         try:
             # The canvas API uses SetPixel(x, y, r, g, b)
             data = list(pixels)
             idx = 0
-            for y in range(int(height)):
-                for x in range(int(width)):
+            for y in range(draw_h):
+                for x in range(draw_w):
                     try:
                         r, g, b = data[idx]
                     except Exception:
