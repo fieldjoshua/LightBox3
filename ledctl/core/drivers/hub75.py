@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from typing import Any, Dict, Iterable, Optional, Tuple
-
 from . import OutputDevice
 
 
@@ -30,8 +28,29 @@ class Hub75Driver(OutputDevice):
 
     def open(self) -> None:
         try:
-            # Lazy import to avoid dependency on non-Linux dev machines
-            from rgbmatrix import RGBMatrix, RGBMatrixOptions  # type: ignore
+            # Lazy import to avoid dependency on non-Linux dev machines.
+            # If import fails, try appending path from RGBMATRIX_PATH env var
+            # (e.g., ~/rpi-rgb-led-matrix/bindings/python).
+            try:
+                from rgbmatrix import (
+                    RGBMatrix,
+                    RGBMatrixOptions,
+                )  # type: ignore
+            except Exception:
+                import os as _os
+                import sys as _sys
+                extra = _os.environ.get("RGBMATRIX_PATH", "").strip()
+                if (
+                    extra
+                    and _os.path.isdir(extra)
+                    and extra not in _sys.path
+                ):
+                    _sys.path.append(extra)
+                # Retry import after updating sys.path
+                from rgbmatrix import (
+                    RGBMatrix,
+                    RGBMatrixOptions,
+                )  # type: ignore
 
             hub = self.config.get("hub75", {}) or {}
 
@@ -39,11 +58,26 @@ class Hub75Driver(OutputDevice):
             # Dimensions
             options.rows = int(hub.get("rows", 64))
             options.cols = int(hub.get("cols", 64))
+            # Chain/parallel tiling
+            try:
+                options.chain_length = int(hub.get("chain_length", 1))
+            except Exception:
+                options.chain_length = 1
+            try:
+                options.parallel = int(hub.get("parallel", 1))
+            except Exception:
+                options.parallel = 1
             # Hardware specifics
             if hub.get("hardware_mapping"):
                 options.hardware_mapping = str(hub.get("hardware_mapping"))
             if hub.get("gpio_slowdown") is not None:
                 options.gpio_slowdown = int(hub.get("gpio_slowdown"))
+            if hub.get("pixel_mapper_config"):
+                options.pixel_mapper_config = str(
+                    hub.get("pixel_mapper_config")
+                )
+            if hub.get("panel_type"):
+                options.panel_type = str(hub.get("panel_type"))
 
             matrix = RGBMatrix(options=options)
             canvas = matrix.CreateFrameCanvas()
@@ -57,7 +91,7 @@ class Hub75Driver(OutputDevice):
 
             self._matrix = matrix
             self._canvas = canvas
-            # Cache corrected width/height from device (some setups tile panels)
+            # Cache width/height from device (some setups tile panels)
             try:
                 self._width = int(canvas.width)
                 self._height = int(canvas.height)
@@ -105,9 +139,15 @@ class Hub75Driver(OutputDevice):
 
         # Validate dimensions
         if self._width and self._height:
-            if int(width) != int(self._width) or int(height) != int(self._height):
+            if (
+                int(width) != int(self._width)
+                or int(height) != int(self._height)
+            ):
                 raise ValueError(
-                    f"Frame size {width}x{height} does not match HUB75 {self._width}x{self._height}"
+                    (
+                        "Frame size %sx%s does not match HUB75 %sx%s"
+                        % (width, height, self._width, self._height)
+                    )
                 )
 
         # Draw pixels onto offscreen canvas, then swap on vsync
@@ -123,11 +163,19 @@ class Hub75Driver(OutputDevice):
                         r, g, b = 0, 0, 0
                     idx += 1
                     # type: ignore[attr-defined]
-                    self._canvas.SetPixel(int(x), int(y), int(r), int(g), int(b))  # pragma: no cover
+                    self._canvas.SetPixel(
+                        int(x),
+                        int(y),
+                        int(r),
+                        int(g),
+                        int(b),
+                    )  # pragma: no cover
 
             # Swap buffer to screen
             # type: ignore[attr-defined]
-            self._canvas = self._matrix.SwapOnVSync(self._canvas)  # pragma: no cover
+            self._canvas = self._matrix.SwapOnVSync(
+                self._canvas
+            )  # pragma: no cover
         except Exception as exc:  # pragma: no cover - hw-specific
             raise RuntimeError(f"HUB75 draw failed: {exc}") from exc
 
