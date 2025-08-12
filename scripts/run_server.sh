@@ -22,6 +22,14 @@ PORT="${PORT:-5000}"
 USE_SUDO="${USE_SUDO:-0}"
 FORCE="${FORCE:-0}"
 
+# Optionally append rgbmatrix bindings path for HUB75 if not installed site-wide
+if [ -z "${RGBMATRIX_PATH:-}" ] && [ -d "$HOME/rpi-rgb-led-matrix/bindings/python" ]; then
+  RGBMATRIX_PATH="$HOME/rpi-rgb-led-matrix/bindings/python"
+fi
+if [ -n "${RGBMATRIX_PATH:-}" ]; then
+  export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$RGBMATRIX_PATH"
+fi
+
 if [ -z "${LEDCTL_CONFIG:-}" ]; then
   if [ -f "$LEDCTL_DIR/config/device.yml" ]; then
     LEDCTL_CONFIG="$LEDCTL_DIR/config/device.yml"
@@ -90,6 +98,9 @@ export HOST
 export PORT
 
 say "Starting server: HOST=$HOST PORT=$PORT LEDCTL_CONFIG=$LEDCTL_CONFIG"
+if [ -n "${RGBMATRIX_PATH:-}" ]; then
+  say "PYTHONPATH+=${RGBMATRIX_PATH}"
+fi
 if [ "$USE_SUDO" = "1" ]; then
   exec sudo -E "$PYTHON_BIN" app.py
 else
