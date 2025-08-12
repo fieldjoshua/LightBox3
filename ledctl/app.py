@@ -5,6 +5,7 @@ import signal
 import time
 import secrets
 import mimetypes
+import io
 from typing import Any, Dict, Optional, List
 from flask import (
     Flask,
@@ -22,6 +23,7 @@ import yaml
 # Local imports
 from core.drivers import OutputDevice
 from core.drivers.preview import NullPreviewDriver
+from core.renderer import Renderer
 
 
 socketio: Optional[SocketIO] = None
@@ -67,6 +69,7 @@ def create_app() -> Flask:
     except Exception as exc:  # broad but logged; boot in safe defaults
         logging.exception("Failed to load config: %s", exc)
         cfg = _default_config()
+    app.config["config"] = cfg
 
     # Realtime communications
     global socketio
@@ -74,7 +77,11 @@ def create_app() -> Flask:
 
     # Output device selection; start with Preview
     try:
-        app.config["output_device"] = _create_output_device(cfg)
+        device = _create_output_device(cfg)
+        # Attempt to open the device (no-op for preview)
+        with _suppress_ex("device.open"):
+            device.open()
+        app.config["output_device"] = device
     except Exception as exc:
         logging.exception(
             "Failed to initialize output device: %s",
@@ -84,6 +91,13 @@ def create_app() -> Flask:
         app.config["output_device"] = NullPreviewDriver(
             device_name="PREVIEW_FALLBACK"
         )
+
+    # Renderer service
+    try:
+        renderer = Renderer(app.config["output_device"], cfg)
+        app.config["renderer"] = renderer
+    except Exception:
+        logging.exception("Failed to initialize renderer")
 
     @app.route("/")
     def index():
@@ -102,6 +116,89 @@ def create_app() -> Flask:
         data = dict(app.config.get("metrics", {}))
         data["uptime_s"] = round(float(uptime_s), 3)
         return jsonify(data)
+
+    # Playback controls
+    @app.post("/api/playback/start")
+    def api_playback_start() -> Any:
+        try:
+            payload = request.get_json(silent=True) or {}
+            name = str(
+                payload.get("file") or payload.get("name") or ""
+            ).strip()
+            if not name:
+                return jsonify({"error": "missing file"}), 400
+            upload_dir = app.config.get("upload_dir")
+            if not upload_dir:
+                return jsonify({"error": "upload_dir_missing"}), 500
+            # Only allow files inside uploads
+            path = os.path.abspath(os.path.join(upload_dir, name))
+            if not path.startswith(os.path.abspath(upload_dir) + os.sep):
+                return jsonify({"error": "invalid path"}), 400
+            renderer: Renderer = app.config.get(
+                "renderer"
+            )  # type: ignore[assignment]
+            if not renderer:
+                return jsonify({"error": "renderer_unavailable"}), 500
+            renderer.start(path)
+            return jsonify({"ok": True})
+        except FileNotFoundError:
+            return jsonify({"error": "not_found"}), 404
+        except Exception as exc:
+            logging.exception("playback start failed: %s", exc)
+            return jsonify({"error": "start_failed"}), 500
+
+    @app.post("/api/playback/stop")
+    def api_playback_stop() -> Any:
+        try:
+            renderer: Renderer = app.config.get(
+                "renderer"
+            )  # type: ignore[assignment]
+            if not renderer:
+                return jsonify({"error": "renderer_unavailable"}), 500
+            renderer.stop()
+            return jsonify({"ok": True})
+        except Exception as exc:
+            logging.exception("playback stop failed: %s", exc)
+            return jsonify({"error": "stop_failed"}), 500
+
+    @app.get("/api/playback/status")
+    def api_playback_status() -> Any:
+        try:
+            renderer: Renderer = app.config.get(
+                "renderer"
+            )  # type: ignore[assignment]
+            if not renderer:
+                return jsonify({"error": "renderer_unavailable"}), 500
+            return jsonify(renderer.get_status())
+        except Exception as exc:
+            logging.exception("playback status failed: %s", exc)
+            return jsonify({"error": "status_failed"}), 500
+
+    @app.get("/api/preview.png")
+    def api_preview() -> Any:
+        try:
+            renderer: Renderer = app.config.get(
+                "renderer"
+            )  # type: ignore[assignment]
+            img = None
+            if renderer:
+                img = renderer.get_latest_image()
+            # Fallback: if preview device stores latest
+            if img is None:
+                device: OutputDevice = app.config.get(
+                    "output_device"
+                )  # type: ignore[assignment]
+                if isinstance(device, NullPreviewDriver):
+                    img = device.get_latest_image()
+            if img is None:
+                return abort(404)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            return app.response_class(buf.getvalue(), mimetype="image/png")
+        except Exception as exc:
+            logging.exception("preview failed: %s", exc)
+            return jsonify({"error": "preview_failed"}), 500
 
     @app.before_request
     def _before_request_hook() -> None:  # type: ignore[override]
@@ -168,12 +265,36 @@ def create_app() -> Flask:
     def ws_set_params(payload: Dict[str, Any]) -> None:  # type: ignore
         try:
             render = _validate_render_params(payload)
-            cfg = _default_config()
-            cfg["render"].update(render)
-            # Store to app for now (persistence added later)
-            # No direct hardware calls here at M1
+            # Persist to app config
+            cfg: Dict[str, Any] = app.config.get("config", _default_config())
+            cfg.setdefault("render", {}).update(render)
+            app.config["config"] = cfg
+            # Apply to renderer
+            renderer: Renderer = app.config.get(
+                "renderer"
+            )  # type: ignore[assignment]
+            if renderer:
+                renderer.set_render_params(render)
         except Exception as exc:
             logging.exception("set_params error: %s", exc)
+
+    @app.post("/api/brightness")
+    def api_brightness() -> Any:
+        try:
+            payload = request.get_json(silent=True) or {}
+            value = float(payload.get("value01", 1.0))
+            value = max(0.0, min(1.0, value))
+            device: OutputDevice = app.config.get(
+                "output_device"
+            )  # type: ignore[assignment]
+            if not device:
+                return jsonify({"error": "device_unavailable"}), 500
+            with _suppress_ex("device.set_brightness"):
+                device.set_brightness(value)
+            return jsonify({"ok": True})
+        except Exception as exc:
+            logging.exception("brightness failed: %s", exc)
+            return jsonify({"error": "brightness_failed"}), 500
 
     # Graceful shutdown hooks
     _install_signal_handlers(app)
@@ -346,11 +467,23 @@ def _install_signal_handlers(app: Flask) -> None:
         logging.exception("Failed to install signal handlers")
 
 
+class _suppress_ex:
+    def __init__(self, context: str) -> None:
+        self._ctx = context
+
+    def __enter__(self) -> None:  # type: ignore[override]
+        return None
+
+    def __exit__(self, exc_type, exc, tb) -> bool:  # type: ignore[override]
+        if exc:
+            logging.exception("%s: %s", self._ctx, exc)
+        # Suppress exceptions
+        return True
+
+
 if __name__ == "__main__":
     flask_app = create_app()
     # Bind to localhost by default; override with HOST env when needed
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", 5000))
     socketio.run(flask_app, host=host, port=port)
-
-
