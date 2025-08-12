@@ -1,0 +1,32 @@
+device: PREVIEW  # HUB75 | WS2811_PI | WLED | PREVIEW
+
+hub75:
+  rows: 64
+  cols: 64
+  hardware_mapping: "adafruit-hat"
+  gpio_slowdown: 2
+  brightness: 85
+
+ws2811:
+  width: 10
+  height: 10
+  count: 100
+  gpio: 18
+  brightness: 128
+  pixel_order: "GRB"
+  map_file: "config/ws2811.map.json"
+
+wled:
+  host: "192.168.1.50"
+  port: 21324
+
+render:
+  scale: "LANCZOS"
+  fps_cap: 60
+  gamma: 2.2
+  rgb_balance: [1.0, 1.0, 1.0]
+  mirror_x: false
+  mirror_y: false
+  rotate: 0
+
+

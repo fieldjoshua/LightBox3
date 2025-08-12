@@ -1,0 +1,9 @@
+flask
+flask-socketio
+Pillow
+opencv-python
+pyyaml
+rpi-rgb-led-matrix; platform_system == "Linux"
+rpi_ws281x; platform_system == "Linux"
+eventlet
+
