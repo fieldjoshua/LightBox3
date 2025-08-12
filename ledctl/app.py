@@ -458,6 +458,9 @@ def _install_signal_handlers(app: Flask) -> None:
             logging.exception(
                 "Error while closing output device",
             )
+        finally:
+            # Ensure process exits on SIGINT/SIGTERM after cleanup
+            os._exit(0)
 
     # Register common termination signals
     try:
