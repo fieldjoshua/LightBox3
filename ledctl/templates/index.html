@@ -7,16 +7,39 @@
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <!-- Minimal M0 GUI placeholder. Full controls arrive in M3. -->
+    <!-- Minimal GUI controls: preview, files, play/stop, brightness, built-in anims -->
     <header>
       <h1>Unified Lightbox Interface</h1>
-      <p>Server is running. GUI controls will be added in the next milestone.</p>
+      <p>Server is running.</p>
     </header>
     <main>
       <section>
-        <p>
-          Health: <span id="health">checking…</span>
-        </p>
+        <p>Health: <span id="health">checking…</span></p>
+        <div style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap">
+          <div>
+            <h3>Preview</h3>
+            <img id="preview" src="/api/preview.png" alt="preview" width="256" height="256" style="object-fit:contain;border:1px solid #444" />
+          </div>
+          <div>
+            <h3>Controls</h3>
+            <div>
+              <label>Brightness</label>
+              <input id="brightness" type="range" min="0" max="1" step="0.05" value="0.8" />
+            </div>
+            <div>
+              <button id="btn-stop">Stop</button>
+            </div>
+            <div>
+              <label>Built-in Animation</label>
+              <select id="anim-select"></select>
+              <button id="btn-anim">Play</button>
+            </div>
+          </div>
+          <div>
+            <h3>Files</h3>
+            <ul id="files"></ul>
+          </div>
+        </div>
       </section>
     </main>
     <script src="/static/main.js"></script>

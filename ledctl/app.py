@@ -25,6 +25,7 @@ import yaml
 from core.drivers import OutputDevice
 from core.drivers.preview import NullPreviewDriver
 from core.renderer import Renderer
+from core import anims
 
 
 socketio: Optional[SocketIO] = None
@@ -174,6 +175,31 @@ def create_app() -> Flask:
         except Exception as exc:
             logging.exception("playback status failed: %s", exc)
             return jsonify({"error": "status_failed"}), 500
+
+    @app.get("/api/anims")
+    def api_list_anims() -> Any:
+        try:
+            return jsonify({"anims": list(anims.list_builtin())})
+        except Exception as exc:
+            logging.exception("list anims failed: %s", exc)
+            return jsonify({"error": "anims_failed"}), 500
+
+    @app.post("/api/playback/start_builtin")
+    def api_playback_start_builtin() -> Any:
+        try:
+            payload = request.get_json(silent=True) or {}
+            name = str(payload.get("name", "")).strip()
+            params = dict(payload.get("params", {})) if isinstance(payload.get("params", {}), dict) else {}
+            if not name:
+                return jsonify({"error": "missing name"}), 400
+            renderer: Renderer = app.config.get("renderer")  # type: ignore[assignment]
+            if not renderer:
+                return jsonify({"error": "renderer_unavailable"}), 500
+            renderer.start_builtin(name, params)
+            return jsonify({"ok": True})
+        except Exception as exc:
+            logging.exception("start builtin failed: %s", exc)
+            return jsonify({"error": "start_builtin_failed"}), 500
 
     @app.get("/api/preview.png")
     def api_preview() -> Any:
